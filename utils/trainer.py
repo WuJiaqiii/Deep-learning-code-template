@@ -4,8 +4,8 @@ import torch
 import torch.nn as nn
 from tqdm import tqdm
 import os
-import matplotlib.pyplot as plt
 from torch.amp import autocast, GradScaler
+from torch.utils.tensorboard import SummaryWriter
 
 from utils.utils import AverageMeter, EarlyStopping, save_confusion_matrix
 from models.model import *
@@ -34,6 +34,7 @@ class Trainer:
         # self.scheduler = 
             
         self.early_stopping = EarlyStopping(logger=self.logger, patience=self.config.early_stop_patience, delta=0)
+        self.writer = SummaryWriter(log_dir=config.result_dir)
         
     def train_one_epoch(self, epoch):
         
@@ -64,8 +65,7 @@ class Trainer:
             loss_record.update(loss.item(), labels.size(0))
             
         self.logger.info(f'Train Epoch: {epoch + 1}, Avg Loss: {loss_record.avg:.4f} ')
-        
-        return loss_record.avg
+        self.writer.add_scalar("Loss/Train", loss_record.avg, epoch)
 
     @torch.no_grad() 
     def validate(self, epoch):
@@ -102,20 +102,17 @@ class Trainer:
         self.logger.info(f'Validate Accuracies: {acc:.4f} ')
   
         save_confusion_matrix(targets, preds, self.config, epoch)
+        self.writer.add_scalar("Loss/Validation", loss_record.avg, epoch)
 
         return loss_record.avg
 
     def train(self):
         
         best_val_loss = np.inf
-        train_losses, val_losses = [], []
         for epoch in range(self.config.epochs):
             
-            train_loss = self.train_one_epoch(epoch)
+            self.train_one_epoch(epoch)
             val_loss = self.validate(epoch)
-            
-            train_losses.append(train_loss)
-            val_losses.append(val_loss)
             
             self.scheduler.step()
 
@@ -139,16 +136,4 @@ class Trainer:
         else:
             torch.save(self.model.state_dict(), os.path.join(self.config.model_dir, f'model_last.pth'))
         
-        plt.figure(figsize=(12, 6))
-        plt.subplot(1, 2, 1)
-        plt.plot(range(len(train_losses)), train_losses, label='Train Loss')
-        plt.plot(range(len(val_losses)), val_losses, label='Validation Loss')
-        plt.xlabel('Epoch')
-        plt.ylabel('Loss')
-        plt.legend()
-        plt.title('Training and Validation Loss')
-
-        # Save the plots
-        plt.tight_layout()
-        plt.savefig(os.path.join(self.config.result_dir, 'training_validation_metrics.png'))
-        plt.show()
+        self.writer.close()
